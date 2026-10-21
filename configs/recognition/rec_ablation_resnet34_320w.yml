@@ -1,0 +1,119 @@
+# ============================================================================
+# 08 · 识别头消融 —— ResNet34 + 320px + Server预训练 <- Val Acc=77.1%
+# ============================================================================
+# 所有消融中提升最大的 (+37.9%)。同时改了 3 个因素：
+#   1. Backbone: MBV3 -> ResNet34 (容量大)
+#   2. image_shape: [3,32,100] -> [3,32,320] (截断率 46.7%->1.8%)
+#   3. 预训练: mobile v2.0 -> Server 6.3万中文 (零 mismatch)
+#
+# 为什么没加 RecAug？
+#   ResNet34 + Server大数据预训练 本身就抗过拟合 (Gap=0.9%)
+#   EXP-v4 才补 RecAug + L2=1e-4 做微调 -> 77.38%
+# ============================================================================
+
+Architecture:
+  Backbone:
+    layers: 34
+    name: ResNet
+  Head:
+    fc_decay: 4.0e-05
+    name: CTCHead
+  Neck:
+    encoder_type: rnn
+    hidden_size: 256
+    name: SequenceEncoder
+  Transform: null
+  algorithm: CRNN
+  model_type: rec
+Eval:
+  dataset:
+    data_dir: /root/rec_dataset
+    label_file_list:
+    - /root/rec_dataset/rec_gt_val.txt
+    name: SimpleDataSet
+    transforms:
+    - DecodeImage:
+        channel_first: false
+        img_mode: BGR
+    - CTCLabelEncode: null
+    - RecResizeImg:
+        image_shape:
+        - 3
+        - 32
+        - 320
+    - KeepKeys:
+        keep_keys:
+        - image
+        - label
+        - length
+  loader:
+    batch_size_per_card: 256
+    drop_last: false
+    num_workers: 8
+    shuffle: false
+Global:
+  cal_metric_during_train: true
+  character_dict_path: ppocr/utils/ppocr_keys_v1.txt
+  checkpoints: null
+  epoch_num: 50
+  eval_batch_step:
+  - 0
+  - 300
+  infer_img: doc/imgs_words/ch/word_1.jpg
+  infer_mode: false
+  log_smooth_window: 20
+  max_text_length: 25
+  pretrained_model: /root/.paddleocr/models/PP-OCRv3_rec_train/ch_ppocr_server_v2.0_rec_train/best_accuracy
+  print_batch_step: 10
+  save_epoch_step: 3
+  save_inference_dir: null
+  save_model_dir: ./output/rec_exp_v3/
+  save_res_path: ./output/rec/predicts_chinese_common_v2.0.txt
+  use_gpu: true
+  use_space_char: true
+  use_visualdl: false
+Loss:
+  name: CTCLoss
+Metric:
+  main_indicator: acc
+  name: RecMetric
+Optimizer:
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    learning_rate: 5.0e-05
+    name: Cosine
+    warmup_epoch: 2
+  name: Adam
+  regularizer:
+    factor: 3.0e-05
+    name: L2
+PostProcess:
+  name: CTCLabelDecode
+Train:
+  dataset:
+    data_dir: /root/rec_dataset
+    label_file_list:
+    - /root/rec_dataset/rec_gt_train.txt
+    name: SimpleDataSet
+    transforms:
+    - DecodeImage:
+        channel_first: false
+        img_mode: BGR
+    - RecAug: null
+    - CTCLabelEncode: null
+    - RecResizeImg:
+        image_shape:
+        - 3
+        - 32
+        - 320
+    - KeepKeys:
+        keep_keys:
+        - image
+        - label
+        - length
+  loader:
+    batch_size_per_card: 64
+    drop_last: true
+    num_workers: 8
+    shuffle: true

@@ -1,0 +1,202 @@
+# ============================================================================
+# 01 · 检测头 DBNet v3 最终版 <- F1=0.656
+# ============================================================================
+# 训练命令：python tools/train.py -c /root/exp_v3.yml
+# 权重输出：./output/exp_v3/best_accuracy.pdparams (3.8MB)
+# 评估命令：python tools/eval.py -c /root/exp_v3.yml
+# 评估结果：Precision=0.642, Recall=0.671, F1=0.656
+#
+# 相比官方 PP-OCRv3 mobile det，改了什么：
+#   1. Backbone 保留 MobileNetV3-Large，但 scale 从 1.0 降到 0.5
+#   2. Neck 换成 RSEFPN（带残差连接 + SE 通道注意力的特征金字塔）
+#   3. 预训练换成 ppocrv3_pretrain_fixed.pdparams
+#   4. 训练增强：Fliplr + Affine(+-10度旋转) + Resize + EastRandomCrop
+#   5. 损失函数 DBLoss：alpha=5, beta=10, DiceLoss (解决样本不均衡)
+#   6. 优化器：Adam + Cosine 余弦退火 (lr=5e-5) + L2 正则 (5e-5)
+#   7. 后处理：thresh=0.3, box_thresh=0.6, unclip_ratio=1.5
+# ============================================================================
+
+# ============================================================================
+# exp_v3.yml —— 检测头 DBNet v3 最终版配置
+# ============================================================================
+# 训练命令：python tools/train.py -c /root/exp_v3.yml
+# 权重输出：/root/PaddleOCR/output/exp_v3/best_accuracy.pdparams
+# 最终指标：F1=0.656, P=0.642, R=0.671
+# 权重大小：3.8MB
+#
+# 关键设计（消融实验选出的最佳组合）：
+#   - Backbone: MobileNetV3-Large scale=0.5（轻量移动端网络，比 ResNet50 小 10 倍）
+#   - Neck:     RSEFPN（带残差和通道注意力的特征金字塔）
+#   - Head:     DBHead（可微二值化，输出概率图+阈值图）
+#   - image_shape: [3,960,960]（必须能被 32 整除，因为 4 次下采样）
+#   - Optimizer: Adam + Cosine 余弦退火学习率 + L2 正则
+#
+
+# ============================================================================
+
+Architecture:
+  Backbone:
+    disable_se: false
+    model_name: large
+    name: MobileNetV3
+    scale: 0.5
+  Head:
+    k: 50
+    name: DBHead
+  Neck:
+    name: RSEFPN
+    out_channels: 96
+    shortcut: true
+  Transform: null
+  algorithm: DB
+  model_type: det
+Eval:
+  dataset:
+    data_dir: /root/paddleocr_dataset/det_images/
+    label_file_list:
+    - /root/paddleocr_dataset/det_images/../det_val_list.txt
+    name: SimpleDataSet
+    transforms:
+    - DecodeImage:
+        channel_first: false
+        img_mode: BGR
+    - DetLabelEncode: null
+    - DetResizeForTest: null
+    - NormalizeImage:
+        mean:
+        - 0.485
+        - 0.456
+        - 0.406
+        order: hwc
+        scale: 1./255.
+        std:
+        - 0.229
+        - 0.224
+        - 0.225
+    - ToCHWImage: null
+    - KeepKeys:
+        keep_keys:
+        - image
+        - shape
+        - polys
+        - ignore_tags
+  loader:
+    batch_size_per_card: 1
+    drop_last: false
+    num_workers: 2
+    shuffle: false
+Global:
+  cal_metric_during_train: false
+  checkpoints: /root/PaddleOCR/output/exp_baseline_v2/best_accuracy
+  d2s_train_image_shape:
+  - 3
+  - -1
+  - -1
+  debug: false
+  distributed: true
+  epoch_num: 30
+  eval_batch_step: 100
+  infer_img: doc/imgs_en/img_10.jpg
+  log_smooth_window: 20
+  model_name: PP-OCRv3_mobile_det
+  pretrained_model: /root/ppocrv3_pretrain_fixed.pdparams
+  print_batch_step: 10
+  save_epoch_step: 100
+  save_inference_dir: null
+  save_model_dir: ./output/exp_v3/
+  save_res_path: ./checkpoints/det_db/predicts_db.txt
+  use_gpu: true
+  use_visualdl: false
+Loss:
+  alpha: 5
+  balance_loss: true
+  beta: 10
+  main_loss_type: DiceLoss
+  name: DBLoss
+  ohem_ratio: 3
+Metric:
+  main_indicator: hmean
+  name: DetMetric
+Optimizer:
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    learning_rate: 5.0e-05
+    name: Cosine
+    warmup_epoch: 0
+  name: Adam
+  regularizer:
+    factor: 5.0e-05
+    name: L2
+PostProcess:
+  box_thresh: 0.6
+  max_candidates: 1000
+  name: DBPostProcess
+  thresh: 0.3
+  unclip_ratio: 1.5
+Train:
+  dataset:
+    data_dir: /root/paddleocr_dataset/det_images/
+    label_file_list:
+    - /root/paddleocr_dataset/det_images/../det_train_list.txt
+    name: SimpleDataSet
+    ratio_list:
+    - 1.0
+    transforms:
+    - DecodeImage:
+        channel_first: false
+        img_mode: BGR
+    - DetLabelEncode: null
+    - IaaAugment:
+        augmenter_args:
+        - args:
+            p: 0.5
+          type: Fliplr
+        - args:
+            rotate:
+            - -10
+            - 10
+          type: Affine
+        - args:
+            size:
+            - 0.5
+            - 3
+          type: Resize
+    - EastRandomCropData:
+        keep_ratio: true
+        max_tries: 50
+        size:
+        - 960
+        - 960
+    - MakeBorderMap:
+        shrink_ratio: 0.4
+        thresh_max: 0.7
+        thresh_min: 0.3
+    - MakeShrinkMap:
+        min_text_size: 8
+        shrink_ratio: 0.4
+    - NormalizeImage:
+        mean:
+        - 0.485
+        - 0.456
+        - 0.406
+        order: hwc
+        scale: 1./255.
+        std:
+        - 0.229
+        - 0.224
+        - 0.225
+    - ToCHWImage: null
+    - KeepKeys:
+        keep_keys:
+        - image
+        - threshold_map
+        - threshold_mask
+        - shrink_map
+        - shrink_mask
+  loader:
+    batch_size_per_card: 8
+    drop_last: false
+    num_workers: 4
+    shuffle: true
+profiler_options: null

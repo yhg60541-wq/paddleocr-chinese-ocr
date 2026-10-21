@@ -1,0 +1,85 @@
+@use '@/styles/variables.scss' as *;
+
+.historyPage {
+  min-height: 100vh;
+  background: $color-bg-page;
+  padding: $page-padding;
+  box-sizing: border-box;
+}
+
+.empty {
+  text-align: center;
+  padding: 200rpx 0;
+  color: $color-text-tertiary;
+}
+
+.emptyIcon {
+  font-size: 120rpx;
+  display: block;
+  margin-bottom: $spacing-md;
+}
+
+.emptyText {
+  font-size: $font-size-md;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.historyCard {
+  background: $color-bg-card;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  padding: $spacing-lg;
+}
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-md;
+}
+
+.historyThumb {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: $radius-md;
+  background: #1d2129;
+  flex-shrink: 0;
+}
+
+.historyMeta {
+  flex: 1;
+  overflow: hidden;
+}
+
+.historyText {
+  font-size: $font-size-md;
+  color: $color-text-primary;
+  @include text-ellipsis-multi(2);
+}
+
+.historyTime {
+  font-size: $font-size-xs;
+  color: $color-text-tertiary;
+  margin-top: $spacing-xs;
+}
+
+.countBadge {
+  background: $color-primary;
+  color: #fff;
+  font-size: $font-size-xs;
+  padding: 4rpx 16rpx;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+}
+
+.clearBtn {
+  margin-top: $spacing-xl;
+  text-align: center;
+  font-size: $font-size-md;
+  color: $color-error;
+}

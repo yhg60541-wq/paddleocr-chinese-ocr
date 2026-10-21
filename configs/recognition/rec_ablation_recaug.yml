@@ -1,0 +1,99 @@
+# ============================================================================
+# 07 · 识别头消融 —— Baseline + RecAug 数据增强 <- Val Acc=39.2%
+# ============================================================================
+# 只做了一件事：加 RecAug (RandAugment N=2 + Cutout + ColorJitter)
+# 效果：过拟合 Gap 从 35% 降到 6%，防过拟合有效
+# 但 image_shape 还是 100px，截断问题没解决
+# ============================================================================
+
+Global:
+  epoch_num: 100
+  log_smooth_window: 20
+  print_batch_step: 10
+  save_model_dir: ./output/rec_exp_v2/
+  save_epoch_step: 10
+  eval_batch_step: [0, 300]
+  cal_metric_during_train: true
+  pretrained_model: /root/PaddleOCR/output/rec_custom/iter_epoch_45.pdparams
+  use_gpu: true
+  seed: 1024
+Optimizer:
+  name: Adam
+  lr:
+    name: Cosine
+    learning_rate: 0.0001
+    warmup_epoch: 2
+  regularizer:
+    name: L2
+    factor: 1.0e-04
+Architecture:
+  model_type: rec
+  algorithm: CRNN
+  Backbone:
+    name: MobileNetV3
+    scale: 1.0
+    model_name: large
+  Neck:
+    name: SequenceEncoder
+    encoder_type: rnn
+    hidden_size: 48
+  Head:
+    name: CTCHead
+    fc_decay: 5.0e-04
+    character_dict_path: /root/rec_dataset/dict_char.txt
+Loss:
+  name: CTCLoss
+PostProcess:
+  name: CTCLabelDecode
+  character_dict_path: /root/rec_dataset/dict_char.txt
+  use_space_char: false
+Metric:
+  name: RecMetric
+  main_indicator: acc
+  character_dict_path: /root/rec_dataset/dict_char.txt
+  use_space_char: false
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: /root/rec_dataset/
+    label_file_list: [/root/rec_dataset/rec_gt_train.txt]
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - RecAug:
+      - CTCLabelEncode:
+          max_text_length: 25
+          character_dict_path: /root/rec_dataset/dict_char.txt
+          use_space_char: false
+      - RecResizeImg:
+          image_shape: [3, 32, 100]
+      - KeepKeys:
+          keep_keys: [image, label, length, valid_ratio]
+  loader:
+    shuffle: true
+    batch_size_per_card: 128
+    drop_last: true
+    num_workers: 4
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: /root/rec_dataset/
+    label_file_list: [/root/rec_dataset/rec_gt_val.txt]
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - CTCLabelEncode:
+          max_text_length: 25
+          character_dict_path: /root/rec_dataset/dict_char.txt
+          use_space_char: false
+      - RecResizeImg:
+          image_shape: [3, 32, 100]
+      - KeepKeys:
+          keep_keys: [image, label, length, valid_ratio]
+  loader:
+    shuffle: false
+    batch_size_per_card: 128
+    drop_last: false
+    num_workers: 4

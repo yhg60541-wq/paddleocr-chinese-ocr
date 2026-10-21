@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 训练产物（权重与日志统一放在 Releases / 本地，不入库）
+*.pdparams
+*.pdopt
+*.zip
+output/
+logs/
+train_*.log
+
+# 数据集原图（仓库仅保留 dataset/samples 中的少量样例）
+dataset/det_images/
+dataset/rec_images/
+
+# 第三方源码
+PaddleOCR/
+
+# 小程序
+node_modules/
+miniprogram/node_modules/
+miniprogram/dist/
+.pai/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

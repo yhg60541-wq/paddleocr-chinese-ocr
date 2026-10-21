@@ -1,0 +1,149 @@
+# ============================================================================
+# 02 · 识别头 CRNN 最终版 <- Val Acc=77.38%
+# ============================================================================
+# 训练命令：python tools/train.py -c rec_exp_v4.yml
+# 权重输出：./output/rec_exp_v4/best_accuracy.pdparams (118MB, epoch 36)
+# 评估结果：Val Acc=77.38%
+#
+# 相比 Baseline，改了什么（4 组消融逐步发现）：
+#   1. Backbone: MobileNetV3 -> ResNet34（容量大得多）
+#   2. 预训练: mobile v2.0(171处不匹配) -> Server 6.3万中文(零不匹配)
+#   3. image_shape: [3,32,100] -> [3,32,320]（最关键！截断率 46.7%->1.8%）
+#   4. + RecAug 数据增强 + L2=1e-4 防过拟合
+#
+# 4 组识别消融演进：
+#   Baseline: MBV3 + [3,32,100] -> 33.8%（灾难级截断）
+#   EXP-v2:  MBV3 + 100px + RecAug -> 39.2% (+5.4%)
+#   EXP-v3:  ResNet34 + [3,32,320] + Server预训练 -> 77.1% (+37.9%)
+#   EXP-v4:  以上全部 + L2=1e-4 -> 77.38% (+0.28%)
+#
+# 过拟合 Gap (Train@50 - Best Val)：
+#   35.3% -> 6% -> 0.9% -> 0.12% (几乎完美)
+# ============================================================================
+
+# ============================================================================
+# rec_exp_v4.yml —— 识别头 CRNN 最终版配置
+# ============================================================================
+# 训练命令：python tools/train.py -c rec_exp_v4.yml
+# 权重输出：./output/rec_exp_v4/best_accuracy.pdparams
+# 最终指标：Val Acc=77.38%（36 epoch）
+# 权重大小：118MB
+#
+# 4 组消融实验的演进：
+#   Baseline: MBV3 + 100px 宽 → 33.8%（46.7% 样本被截断！）
+#   EXP-v2:  + RecAug 数据增强 → 39.2%
+#   EXP-v3:  换 ResNet34 + 宽度改 320px + Server 预训练 → 77.1%（+37.9% 🔥）
+#   EXP-v4:  + L2 正则 1e-4 → 77.38%（过拟合 gap 仅 0.12%）
+#
+# 关键设计：
+#   - Backbone: ResNet34（残差网络，比 MBV3 容量大得多）
+#   - Neck:     RNN 2 层 LSTM hidden_size=256
+#   - Head:     CTC（时序分类，不需要字符级对齐标注）
+#   - image_shape: [3,32,320] ← 最关键！100→320 直接 +30% Acc
+#   - 预训练:   PP-OCR Server 6.3 万中文（零 shape mismatch）
+#   - 字典:     ppocr_keys_v1.txt（6624 常用汉字 + 英文 + 数字）
+#   - RecAug:   RandAugment(N=2) + Cutout + ColorJitter（防过拟合）
+#   - L2=1e-4: 权重衰减（进一步防过拟合）
+#
+# ⚠️ 注意事项：
+#   1. 推理时必须手动补 Head.out_channels=6625（6624字 + 1 个 blank）
+#      config.yml 里没这个字段，Flask 的 make_cfg() 会补
+#   2. 预训练权重路径要指向 Server 预训练的 best_accuracy
+# ============================================================================
+
+# EXP-v4: ResNet34 + RNN + 320w + Server Pretrain + RecAug
+Global:
+  epoch_num: 50
+  log_smooth_window: 20
+  print_batch_step: 10
+  save_model_dir: ./output/rec_exp_v4/
+  save_epoch_step: 5
+  eval_batch_step: [0, 300]
+  cal_metric_during_train: true
+  pretrained_model: /root/.paddleocr/models/PP-OCRv3_rec_train/ch_ppocr_server_v2.0_rec_train/best_accuracy
+  use_gpu: true
+  max_text_length: 25
+  character_dict_path: ppocr/utils/ppocr_keys_v1.txt
+  use_space_char: true
+  infer_mode: false
+  checkpoints: null
+
+Architecture:
+  model_type: rec
+  algorithm: CRNN
+  Transform: null
+  Backbone:
+    name: ResNet
+    layers: 34
+  Neck:
+    name: SequenceEncoder
+    encoder_type: rnn
+    hidden_size: 256
+  Head:
+    name: CTCHead
+    fc_decay: 4.0e-05
+
+Loss:
+  name: CTCLoss
+
+PostProcess:
+  name: CTCLabelDecode
+
+Metric:
+  name: RecMetric
+  main_indicator: acc
+
+Optimizer:
+  name: Adam
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Cosine
+    learning_rate: 5.0e-05
+    warmup_epoch: 2
+  regularizer:
+    name: L2
+    factor: 1.0e-04
+
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: /root/rec_dataset
+    label_file_list:
+      - /root/rec_dataset/rec_gt_train.txt
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - RecAug: null
+      - CTCLabelEncode: null
+      - RecResizeImg:
+          image_shape: [3, 32, 320]
+      - KeepKeys:
+          keep_keys: ['image', 'label', 'length']
+  loader:
+    batch_size_per_card: 64
+    drop_last: true
+    num_workers: 8
+    shuffle: true
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: /root/rec_dataset
+    label_file_list:
+      - /root/rec_dataset/rec_gt_val.txt
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - CTCLabelEncode: null
+      - RecResizeImg:
+          image_shape: [3, 32, 320]
+      - KeepKeys:
+          keep_keys: ['image', 'label', 'length']
+  loader:
+    batch_size_per_card: 256
+    drop_last: false
+    num_workers: 8
+    shuffle: false
